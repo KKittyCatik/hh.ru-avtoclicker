@@ -3,6 +3,7 @@ package httptransport
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -33,8 +34,19 @@ func NewServer(addr string, handlers *Handlers, hub *ws.Hub) *http.Server {
 	})
 
 	return &http.Server{
-		Addr:              fmt.Sprintf(":%s", addr),
+		Addr:              normalizeAddr(addr),
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+}
+
+func normalizeAddr(addr string) string {
+	trimmed := strings.TrimSpace(addr)
+	if trimmed == "" {
+		return ":8080"
+	}
+	if strings.Contains(trimmed, ":") {
+		return trimmed
+	}
+	return fmt.Sprintf(":%s", trimmed)
 }

@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,6 +26,7 @@ type Client struct {
 	tokenSource TokenSource
 	logger      *slog.Logger
 	rand        *rand.Rand
+	randMu      sync.Mutex
 }
 
 func NewClient(httpClient *http.Client, tokenSource TokenSource, logger *slog.Logger) *Client {
@@ -56,14 +59,22 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, body any, out 
 		}
 	}
 
-	url := strings.TrimRight(c.baseURL, "/") + "/" + strings.TrimLeft(path, "/")
+	parsedBase, err := url.Parse(c.baseURL)
+	if err != nil {
+		return fmt.Errorf("parse base URL: %w", err)
+	}
+	resolvedURL, err := parsedBase.Parse(path)
+	if err != nil {
+		return fmt.Errorf("resolve request URL: %w", err)
+	}
+	requestURL := resolvedURL.String()
 	backoff := time.Second
 	for attempt := 0; attempt < 8; attempt++ {
 		var reader io.Reader
 		if payload != nil {
 			reader = bytes.NewReader(payload)
 		}
-		req, err := http.NewRequestWithContext(ctx, method, url, reader)
+		req, err := http.NewRequestWithContext(ctx, method, requestURL, reader)
 		if err != nil {
 			return fmt.Errorf("create request: %w", err)
 		}
@@ -82,9 +93,9 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, body any, out 
 		resp, err := c.httpClient.Do(req)
 		latency := time.Since(started)
 		if err != nil {
-			return fmt.Errorf("do request %s %s: %w", method, url, err)
+			return fmt.Errorf("do request %s %s: %w", method, requestURL, err)
 		}
-		c.logger.Info("hh request", "method", method, "url", url, "status", resp.StatusCode, "latency", latency.String())
+		c.logger.Info("hh request", "method", method, "url", requestURL, "status", resp.StatusCode, "latency", latency.String())
 
 		bodyBytes, readErr := io.ReadAll(resp.Body)
 		closeErr := resp.Body.Close()
@@ -127,7 +138,9 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, body any, out 
 }
 
 func (c *Client) randomDelay(ctx context.Context) error {
+	c.randMu.Lock()
 	seconds := c.rand.Intn(5) + 1
+	c.randMu.Unlock()
 	return sleepContext(ctx, time.Duration(seconds)*time.Second)
 }
 

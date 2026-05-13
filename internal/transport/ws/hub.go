@@ -43,7 +43,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	delete(h.clients, conn)
 	h.mu.Unlock()
-	_ = conn.Close(websocket.StatusNormalClosure, "bye")
+	_ = conn.Close(websocket.StatusNormalClosure, "connection closed by server")
 }
 
 func (h *Hub) Broadcast(ctx context.Context, event string, payload any) error {
@@ -67,7 +67,7 @@ func (h *Hub) Broadcast(ctx context.Context, event string, payload any) error {
 			h.mu.Lock()
 			delete(h.clients, c)
 			h.mu.Unlock()
-			_ = c.Close(websocket.StatusInternalError, "write failed")
+			_ = c.Close(websocket.StatusInternalError, "broadcast failed")
 		}
 	}
 	return nil

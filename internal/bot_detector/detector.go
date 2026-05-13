@@ -40,9 +40,5 @@ func IsBot(msg hh.Message) bool {
 		}
 	}
 
-	if strings.Contains(text, "?") && !hasPersonal {
-		return true
-	}
-
 	return false
 }

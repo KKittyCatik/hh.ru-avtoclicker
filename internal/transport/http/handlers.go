@@ -1,7 +1,6 @@
 package httptransport
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -93,7 +92,7 @@ func (h *Handlers) TriggerReplies(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, fmt.Errorf("decode trigger replies request: %w", err))
 		return
 	}
-	if err := h.ReplyWorker.ProcessNegotiations(context.Background(), req.Resume, req.VacancyDescription); err != nil {
+	if err := h.ReplyWorker.ProcessNegotiations(r.Context(), req.Resume, req.VacancyDescription); err != nil {
 		h.writeError(w, http.StatusBadGateway, fmt.Errorf("process replies: %w", err))
 		return
 	}

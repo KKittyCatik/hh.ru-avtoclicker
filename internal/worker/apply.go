@@ -16,6 +16,8 @@ import (
 	"hh-autoresponder/internal/transport/ws"
 )
 
+const coverLetterSystemPrompt = "Ты соискатель. Напиши краткое сопроводительное письмо на русском."
+
 type ApplyWorker struct {
 	hhClient    *hh.Client
 	llmClient   llm.LLMClient
@@ -99,7 +101,7 @@ func (w *ApplyWorker) run(ctx context.Context, searchURLs []string, resumeID str
 				return nil
 			}
 
-			coverLetter, err := w.llmClient.Complete(gctx, "Ты соискатель. Напиши краткое сопроводительное письмо на русском.", fmt.Sprintf("Вакансия: %s\nОписание: %s", vacancy.Name, vacancy.Description))
+			coverLetter, err := w.llmClient.Complete(gctx, coverLetterSystemPrompt, fmt.Sprintf("Вакансия: %s\nОписание: %s", vacancy.Name, vacancy.Description))
 			if err != nil {
 				return fmt.Errorf("generate cover letter for %s: %w", vacancy.ID, err)
 			}

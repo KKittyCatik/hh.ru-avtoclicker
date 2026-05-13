@@ -26,6 +26,7 @@ func New(hhClient *hh.Client, dailyLimiter *limiter.DailyLimiter, resumeIDs []st
 }
 
 func (s *Scheduler) Start(ctx context.Context) error {
+	// Every 4 hours at minute 0.
 	if _, err := s.cron.AddFunc("0 */4 * * *", func() {
 		if err := s.publishResumes(ctx); err != nil {
 			s.logger.Error("publish resumes job failed", "error", err)

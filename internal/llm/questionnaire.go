@@ -95,7 +95,11 @@ func lowConfidence(text string) bool {
 }
 
 func enforceThreeSentences(text string) string {
-	parts := strings.Split(text, ".")
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+	parts := strings.Split(trimmed, ".")
 	clean := make([]string, 0, 3)
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
@@ -108,7 +112,10 @@ func enforceThreeSentences(text string) string {
 		}
 	}
 	if len(clean) == 0 {
-		return strings.TrimSpace(text)
+		if strings.HasSuffix(trimmed, ".") || strings.HasSuffix(trimmed, "!") || strings.HasSuffix(trimmed, "?") {
+			return trimmed
+		}
+		return trimmed + "."
 	}
 	return strings.Join(clean, ". ") + "."
 }

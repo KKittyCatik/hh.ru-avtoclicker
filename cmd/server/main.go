@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -118,7 +117,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Error("shutdown server", "error", fmt.Errorf("shutdown http server: %w", err))
+		logger.Error("shutdown server", "error", err)
 	}
 	logger.Info("server stopped")
 }
