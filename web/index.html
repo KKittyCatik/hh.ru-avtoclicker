@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HH Autoresponder</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    button { margin-right: 8px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 6px; }
+  </style>
+</head>
+<body>
+  <h1>HH Autoresponder</h1>
+  <div>
+    <button id="start">Start Apply Worker</button>
+    <button id="stop">Stop Apply Worker</button>
+  </div>
+  <h2>Статистика</h2>
+  <table>
+    <tr><th>Отклики сегодня</th><th>Приглашения</th><th>Просмотры</th></tr>
+    <tr><td id="applies">0</td><td id="invites">0</td><td id="views">0</td></tr>
+  </table>
+
+  <h2>Переписки</h2>
+  <ul id="negotiations"></ul>
+
+  <h2>События</h2>
+  <pre id="events"></pre>
+
+  <script>
+    async function api(path, method = 'GET', body) {
+      const res = await fetch(path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }
+
+    async function refreshStats() {
+      const stats = await api('/api/stats');
+      document.getElementById('applies').textContent = stats.applies_today ?? 0;
+      document.getElementById('invites').textContent = stats.invitations ?? 0;
+      document.getElementById('views').textContent = stats.views ?? 0;
+    }
+
+    async function refreshNegotiations() {
+      const list = await api('/api/negotiations');
+      const container = document.getElementById('negotiations');
+      container.innerHTML = '';
+      list.forEach((n) => {
+        const li = document.createElement('li');
+        li.textContent = `${n.id}: ${n.status} | isBot=${n.is_bot} | needsReply=${n.needs_reply}`;
+        container.appendChild(li);
+      });
+    }
+
+    document.getElementById('start').onclick = async () => {
+      await api('/api/apply/start', 'POST');
+    };
+    document.getElementById('stop').onclick = async () => {
+      await api('/api/apply/stop', 'POST');
+    };
+
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    ws.onmessage = (evt) => {
+      const events = document.getElementById('events');
+      events.textContent = evt.data + '\n' + events.textContent;
+      refreshStats().catch(console.error);
+      refreshNegotiations().catch(console.error);
+    };
+
+    refreshStats().catch(console.error);
+    refreshNegotiations().catch(console.error);
+  </script>
+</body>
+</html>
