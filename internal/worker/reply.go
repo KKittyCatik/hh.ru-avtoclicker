@@ -18,6 +18,13 @@ type ReplyWorker struct {
 	logger    *slog.Logger
 }
 
+type DraftReply struct {
+	Text               string `json:"text"`
+	QuickReplyOptionID string `json:"quickReplyOptionId,omitempty"`
+	NeedsHumanInput    bool   `json:"needsHumanInput"`
+	IsBotFlow          bool   `json:"isBotFlow"`
+}
+
 func NewReplyWorker(hhClient *hh.Client, llmClient llm.LLMClient, hub *ws.Hub, logger *slog.Logger) *ReplyWorker {
 	if logger == nil {
 		logger = slog.Default()
@@ -64,4 +71,35 @@ func (w *ReplyWorker) ProcessNegotiations(ctx context.Context, resume string, va
 		_ = w.hub.Broadcast(ctx, "new_message", map[string]any{"negotiation_id": n.ID, "reply_type": "auto_text"})
 	}
 	return nil
+}
+
+func (w *ReplyWorker) GenerateDraft(ctx context.Context, negotiationID string) (DraftReply, error) {
+	messages, err := w.hhClient.ListNegotiationMessages(ctx, negotiationID)
+	if err != nil {
+		return DraftReply{}, fmt.Errorf("list messages for %s: %w", negotiationID, err)
+	}
+	if len(messages) == 0 {
+		return DraftReply{}, fmt.Errorf("no messages found for %s", negotiationID)
+	}
+
+	last := messages[len(messages)-1]
+	if bot_detector.IsBot(last) && len(last.Options) > 0 {
+		return DraftReply{
+			Text:               last.Options[0].Text,
+			QuickReplyOptionID: last.Options[0].ID,
+			NeedsHumanInput:    false,
+			IsBotFlow:          true,
+		}, nil
+	}
+
+	reply, needsInput, err := llm.GenerateHRReply(ctx, w.llmClient, "", "", messages)
+	if err != nil {
+		return DraftReply{}, fmt.Errorf("generate reply for %s: %w", negotiationID, err)
+	}
+
+	return DraftReply{
+		Text:            reply,
+		NeedsHumanInput: needsInput,
+		IsBotFlow:       false,
+	}, nil
 }

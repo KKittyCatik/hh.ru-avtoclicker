@@ -3,6 +3,9 @@ package httptransport
 import (
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -20,18 +23,20 @@ func NewServer(addr string, handlers *Handlers, hub *ws.Hub) *http.Server {
 	r.Use(middleware.Logger)
 
 	r.Get("/ws", hub.ServeHTTP)
-	r.Handle("/", http.FileServer(http.Dir("web")))
 
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/apply/start", handlers.StartApply)
 		r.Post("/apply/stop", handlers.StopApply)
 		r.Get("/stats", handlers.GetStats)
 		r.Get("/negotiations", handlers.ListNegotiations)
+		r.Get("/negotiations/{id}/messages", handlers.ListNegotiationMessages)
 		r.Post("/negotiations/{id}/reply", handlers.ReplyNegotiation)
+		r.Post("/negotiations/{id}/generate-reply", handlers.GenerateNegotiationReply)
 		r.Post("/negotiations/reply/run", handlers.TriggerReplies)
 		r.Get("/accounts", handlers.ListAccounts)
 		r.Post("/resume/publish", handlers.PublishResume)
 	})
+	r.Handle("/*", spaHandler(frontendRoot()))
 
 	return &http.Server{
 		Addr:              normalizeAddr(addr),
@@ -49,4 +54,37 @@ func normalizeAddr(addr string) string {
 		return trimmed
 	}
 	return fmt.Sprintf(":%s", trimmed)
+}
+
+func frontendRoot() string {
+	if _, err := os.Stat("web/dist/index.html"); err == nil {
+		return "web/dist"
+	}
+	return "web"
+}
+
+func spaHandler(root string) http.Handler {
+	fs := http.Dir(root)
+	fileServer := http.FileServer(fs)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cleaned := path.Clean("/" + strings.TrimPrefix(r.URL.Path, "/"))
+		if cleaned != "/" {
+			if file, err := fs.Open(strings.TrimPrefix(cleaned, "/")); err == nil {
+				_ = file.Close()
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		clone := *r
+		clonedURL := *r.URL
+		clonedURL.Path = "/"
+		clonedURL.RawPath = ""
+		clonedURL.ForceQuery = false
+		clonedURL.RawQuery = ""
+		clone.URL = &url.URL{}
+		*clone.URL = clonedURL
+		fileServer.ServeHTTP(w, &clone)
+	})
 }
