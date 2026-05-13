@@ -36,8 +36,14 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	for {
-		if _, _, err := conn.Read(ctx); err != nil {
+		_, data, err := conn.Read(ctx)
+		if err != nil {
 			break
+		}
+		if string(data) == `{"type":"ping"}` {
+			writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			_ = conn.Write(writeCtx, websocket.MessageText, []byte(`{"type":"pong"}`))
+			cancel()
 		}
 	}
 	h.mu.Lock()

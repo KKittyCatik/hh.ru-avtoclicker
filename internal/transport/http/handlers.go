@@ -49,6 +49,20 @@ func (h *Handlers) ListNegotiations(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, items)
 }
 
+func (h *Handlers) ListNegotiationMessages(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("missing negotiation id"))
+		return
+	}
+	items, err := h.HHClient.ListNegotiationMessages(r.Context(), id)
+	if err != nil {
+		h.writeError(w, http.StatusBadGateway, fmt.Errorf("list negotiation messages: %w", err))
+		return
+	}
+	h.writeJSON(w, http.StatusOK, items)
+}
+
 func (h *Handlers) ReplyNegotiation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -65,6 +79,20 @@ func (h *Handlers) ReplyNegotiation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
+func (h *Handlers) GenerateNegotiationReply(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("missing negotiation id"))
+		return
+	}
+	reply, err := h.ReplyWorker.GenerateDraft(r.Context(), id)
+	if err != nil {
+		h.writeError(w, http.StatusBadGateway, fmt.Errorf("generate negotiation reply: %w", err))
+		return
+	}
+	h.writeJSON(w, http.StatusOK, reply)
 }
 
 func (h *Handlers) ListAccounts(w http.ResponseWriter, r *http.Request) {
