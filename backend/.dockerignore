@@ -1,0 +1,11 @@
+.git
+.gitignore
+.github
+backend
+frontend
+deploy
+web/node_modules
+web/dist
+tmp
+*.log
+*.md

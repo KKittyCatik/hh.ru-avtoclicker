@@ -1,0 +1,69 @@
+version: "3.9"
+
+networks:
+  dev-network:
+    driver: bridge
+
+volumes:
+  go-mod-cache:
+  node-modules:
+  app-data:
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile.dev
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "8080"
+      ACCOUNTS_FILE: /data/accounts.json
+    volumes:
+      - ..:/src
+      - go-mod-cache:/go/pkg/mod
+      - app-data:/data
+    networks:
+      - dev-network
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build:
+      context: ../web
+      dockerfile: ../frontend/Dockerfile.dev
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: http://localhost:8080
+      VITE_WS_URL: ws://localhost:8080
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ../web:/app
+      - node-modules:/app/node_modules
+    networks:
+      - dev-network
+    ports:
+      - "5173:5173"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5173/"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
