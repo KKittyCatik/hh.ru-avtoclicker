@@ -104,7 +104,7 @@ func (a *AuthManager) refresh(ctx context.Context, token OAuthToken) (OAuthToken
 }
 
 func (a *AuthManager) HandleAuthFailure(status int) {
-	if status != http.StatusUnauthorized && status != http.StatusForbidden {
+	if status != http.StatusUnauthorized {
 		return
 	}
 	if a.needsReauth != nil {

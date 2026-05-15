@@ -1,6 +1,7 @@
 package httptransport
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 )
 
 type Handlers struct {
+	Ctx         context.Context
 	ApplyWorker *worker.ApplyWorker
 	ReplyWorker *worker.ReplyWorker
 	Stats       *monitor.Collector
@@ -24,7 +26,7 @@ type Handlers struct {
 }
 
 func (h *Handlers) StartApply(w http.ResponseWriter, r *http.Request) {
-	if err := h.ApplyWorker.Start(r.Context(), h.SearchURLs, h.ResumeID); err != nil {
+	if err := h.ApplyWorker.Start(h.Ctx, h.SearchURLs, h.ResumeID); err != nil {
 		h.writeError(w, http.StatusConflict, fmt.Errorf("start apply worker: %w", err))
 		return
 	}

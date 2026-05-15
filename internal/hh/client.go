@@ -118,7 +118,7 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, body any, out 
 			continue
 		}
 
-		if c.tokenSource != nil && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) {
+		if c.tokenSource != nil && resp.StatusCode == http.StatusUnauthorized {
 			c.tokenSource.HandleAuthFailure(resp.StatusCode)
 		}
 

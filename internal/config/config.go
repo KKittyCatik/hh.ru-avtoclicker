@@ -10,6 +10,7 @@ import (
 type Config struct {
 	HHClientID      string
 	HHClientSecret  string
+	HHRedirectURI   string
 	LLMProvider     string
 	OpenAIAPIKey    string
 	DeepSeekAPIKey  string
@@ -25,6 +26,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		HHClientID:      strings.TrimSpace(os.Getenv("HH_CLIENT_ID")),
 		HHClientSecret:  strings.TrimSpace(os.Getenv("HH_CLIENT_SECRET")),
+		HHRedirectURI:   strings.TrimSpace(os.Getenv("HH_REDIRECT_URI")),
 		LLMProvider:     strings.ToLower(strings.TrimSpace(os.Getenv("LLM_PROVIDER"))),
 		OpenAIAPIKey:    strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
 		DeepSeekAPIKey:  strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY")),
@@ -32,6 +34,10 @@ func Load() (Config, error) {
 		ScheduleFilter:  "any",
 		AccountsFile:    strings.TrimSpace(os.Getenv("ACCOUNTS_FILE")),
 		Port:            "8080",
+	}
+
+	if cfg.HHRedirectURI == "" {
+		cfg.HHRedirectURI = "http://localhost/callback"
 	}
 
 	if cfg.LLMProvider == "" {
