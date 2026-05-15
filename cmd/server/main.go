@@ -45,7 +45,7 @@ func main() {
 	}
 	acct := active[0]
 
-	auth := hh.NewAuthManager(cfg.HHClientID, cfg.HHClientSecret, "http://localhost/callback", nil, logger, &acct.NeedsReauth)
+	auth := hh.NewAuthManager(cfg.HHClientID, cfg.HHClientSecret, cfg.HHRedirectURI, nil, logger, &acct.NeedsReauth)
 	auth.SetToken(acct.Token)
 	hhClient := hh.NewClient(&http.Client{Timeout: 60 * time.Second}, auth, logger)
 
@@ -79,7 +79,11 @@ func main() {
 		resumeID = acct.ResumeIDs[0]
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	handlers := &httptransport.Handlers{
+		Ctx:         ctx,
 		ApplyWorker: applyWorker,
 		ReplyWorker: replyWorker,
 		Stats:       stats,
@@ -89,9 +93,6 @@ func main() {
 		ResumeID:    resumeID,
 	}
 	server := httptransport.NewServer(cfg.Port, handlers, hub)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	sched := scheduler.New(hhClient, dailyLimiter, acct.ResumeIDs, logger)
 	if err := sched.Start(ctx); err != nil {

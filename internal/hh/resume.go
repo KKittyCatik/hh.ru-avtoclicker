@@ -1,8 +1,13 @@
 package hh
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"time"
 )
 
@@ -17,8 +22,58 @@ func (c *Client) ListResumes(ctx context.Context) ([]Resume, error) {
 }
 
 func (c *Client) PublishResume(ctx context.Context, resumeID string) error {
-	if err := c.DoJSON(ctx, "POST", "/resumes/"+resumeID+"/publish", map[string]any{}, nil); err != nil {
+	payload, err := json.Marshal(map[string]any{})
+	if err != nil {
+		return fmt.Errorf("marshal body: %w", err)
+	}
+	requestURL := c.baseURL + "/resumes/" + resumeID + "/publish"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.tokenSource != nil {
+		tok, err := c.tokenSource.AccessToken(ctx)
+		if err != nil {
+			return fmt.Errorf("resolve access token: %w", err)
+		}
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
 		return fmt.Errorf("publish resume %s: %w", resumeID, err)
+	}
+	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		var errResp struct {
+			Errors []struct {
+				Type  string `json:"type"`
+				Value string `json:"value"`
+			} `json:"errors"`
+		}
+		if jsonErr := json.Unmarshal(bodyBytes, &errResp); jsonErr == nil {
+			for _, e := range errResp.Errors {
+				if e.Type == "resumes" {
+					return fmt.Errorf("resume publish cooldown active: %s", e.Value)
+				}
+			}
+		}
+		return fmt.Errorf("publish resume %s: status=%d body=%s", resumeID, resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		if c.tokenSource != nil {
+			c.tokenSource.HandleAuthFailure(resp.StatusCode)
+		}
+		return fmt.Errorf("publish resume %s: status=%d body=%s", resumeID, resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+	}
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("publish resume %s: status=%d body=%s", resumeID, resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
 	}
 	return nil
 }
