@@ -64,11 +64,13 @@ func (ac *AccountContext) Login(email, password string) error {
 	// Wait until at least one email input selector is visible (up to 15s)
 	if err := ac.waitForAnySelector(loginEmailSelectors, 15*time.Second); err != nil {
 		ac.screenshotDebug("login_no_email_input")
+		ac.htmlDebug("login_no_email_input")
 		return fmt.Errorf("login page did not load: no email input found")
 	}
 
 	if err := fillFirstSelector(ac, loginEmailSelectors, email); err != nil {
 		ac.screenshotDebug("login_fill_email_failed")
+		ac.htmlDebug("login_fill_email_failed")
 		return fmt.Errorf("fill email: %w", err)
 	}
 
@@ -88,6 +90,7 @@ func (ac *AccountContext) Login(email, password string) error {
 	// Wait for password field to appear
 	if err := ac.waitForAnySelector(loginPasswordSelectors, 10*time.Second); err != nil {
 		ac.screenshotDebug("login_no_password_input")
+		ac.htmlDebug("login_no_password_input")
 		return fmt.Errorf("password field did not appear: %w", err)
 	}
 
@@ -122,6 +125,7 @@ func (ac *AccountContext) Login(email, password string) error {
 	}
 	if !logged {
 		ac.screenshotDebug("login_not_logged_in")
+		ac.htmlDebug("login_not_logged_in")
 		return fmt.Errorf("login failed: profile element not found after redirect")
 	}
 	ac.LoggedIn = true
@@ -172,7 +176,7 @@ func (ac *AccountContext) waitForAnySelector(selectors []string, timeout time.Du
 	return fmt.Errorf("none of selectors appeared: %s", strings.Join(selectors, ", "))
 }
 
-// screenshotDebug saves a screenshot to the debug directory.
+// screenshotDebug saves a PNG screenshot to the debug directory.
 func (ac *AccountContext) screenshotDebug(name string) {
 	_ = os.MkdirAll("debug", 0o755)
 	path := fmt.Sprintf("debug/%s_%s.png", name, time.Now().Format("20060102_150405"))
@@ -183,6 +187,41 @@ func (ac *AccountContext) screenshotDebug(name string) {
 	if ac.logger != nil {
 		ac.logger.Info("debug screenshot saved", "path", path)
 	}
+}
+
+// htmlDebug saves the current page URL and HTML to a text file for terminal inspection.
+func (ac *AccountContext) htmlDebug(name string) {
+	_ = os.MkdirAll("debug", 0o755)
+	ts := time.Now().Format("20060102_150405")
+
+	// Save current URL
+	currentURL := ac.Page.URL()
+
+	// Get page HTML
+	html, err := ac.Page.Content()
+	if err != nil {
+		html = fmt.Sprintf("error getting content: %v", err)
+	}
+
+	// Get page title
+	title, _ := ac.Page.Title()
+
+	// Write summary file (small, readable in terminal)
+	summaryPath := fmt.Sprintf("debug/%s_%s.txt", name, ts)
+	summary := fmt.Sprintf("URL: %s\nTitle: %s\n\n--- HTML (first 4000 chars) ---\n%s\n",
+		currentURL, title, truncate(html, 4000))
+	_ = os.WriteFile(summaryPath, []byte(summary), 0o644)
+
+	if ac.logger != nil {
+		ac.logger.Info("debug html saved", "path", summaryPath, "url", currentURL, "title", title)
+	}
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "\n... (truncated)"
 }
 
 func (ac *AccountContext) waitCaptchaIfNeeded(ctx context.Context) error {
