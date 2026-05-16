@@ -1,14 +1,16 @@
 package account
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
-	"time"
-
-	"hh-autoresponder/internal/hh"
 )
 
 type Preferences struct {
@@ -20,13 +22,14 @@ type Preferences struct {
 }
 
 type Account struct {
-	ID          string        `json:"id"`
-	Name        string        `json:"name"`
-	Token       hh.OAuthToken `json:"token"`
-	ResumeIDs   []string      `json:"resume_ids"`
-	SearchURLs  []string      `json:"search_urls"`
-	Preferences Preferences   `json:"preferences"`
-	NeedsReauth bool          `json:"needs_reauth"`
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Email       string      `json:"email"`
+	Password    string      `json:"password"`
+	ResumeIDs   []string    `json:"resume_ids"`
+	SearchURLs  []string    `json:"search_urls"`
+	Preferences Preferences `json:"preferences"`
+	NeedsReauth bool        `json:"needs_reauth"`
 }
 
 type Manager struct {
@@ -81,7 +84,6 @@ func (m *Manager) GetAll() []Account {
 }
 
 func (m *Manager) GetActive() []Account {
-	now := time.Now()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	active := make([]Account, 0, len(m.accounts))
@@ -89,15 +91,83 @@ func (m *Manager) GetActive() []Account {
 		if a.NeedsReauth {
 			continue
 		}
-		if a.Token.AccessToken == "" {
+		if strings.TrimSpace(a.Email) == "" {
 			continue
 		}
-		if !a.Token.ExpiresAt.IsZero() && now.After(a.Token.ExpiresAt) {
+		if strings.TrimSpace(a.Password) == "" {
 			continue
 		}
 		active = append(active, a)
 	}
 	return active
+}
+
+func EncryptPassword(plain string, key []byte) (string, error) {
+	if strings.TrimSpace(plain) == "" {
+		return "", fmt.Errorf("password cannot be empty")
+	}
+	// AES-256-GCM requires a 32-byte key.
+	if len(key) != 32 {
+		return "", fmt.Errorf("invalid encryption key size: got %d, expected 32", len(key))
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("create cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("create gcm: %w", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", fmt.Errorf("generate nonce: %w", err)
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(plain), nil)
+	return base64.StdEncoding.EncodeToString(sealed), nil
+}
+
+func DecryptPassword(encrypted string, key []byte) (string, error) {
+	// AES-256-GCM requires a 32-byte key.
+	if len(key) != 32 {
+		return "", fmt.Errorf("invalid encryption key size: got %d, expected 32", len(key))
+	}
+	raw, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return "", fmt.Errorf("decode encrypted password: %w", err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("create cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("create gcm: %w", err)
+	}
+	nonceSize := gcm.NonceSize()
+	if len(raw) < nonceSize {
+		return "", fmt.Errorf("encrypted payload too short")
+	}
+	nonce, ciphertext := raw[:nonceSize], raw[nonceSize:]
+	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", fmt.Errorf("decrypt password: %w", err)
+	}
+	return string(plain), nil
+}
+
+func LoadEncryptionKeyFromEnv() ([]byte, error) {
+	raw := strings.TrimSpace(os.Getenv("ENCRYPTION_KEY"))
+	if raw == "" {
+		return nil, fmt.Errorf("ENCRYPTION_KEY is required")
+	}
+	key, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decode ENCRYPTION_KEY: %w", err)
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("ENCRYPTION_KEY must decode to 32 bytes, got %d", len(key))
+	}
+	return key, nil
 }
 
 func (m *Manager) Update(mutator func(items *[]Account) error) error {

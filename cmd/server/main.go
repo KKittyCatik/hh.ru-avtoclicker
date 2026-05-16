@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"hh-autoresponder/internal/account"
+	"hh-autoresponder/internal/browser"
 	"hh-autoresponder/internal/config"
 	"hh-autoresponder/internal/filters"
-	"hh-autoresponder/internal/hh"
 	"hh-autoresponder/internal/limiter"
 	"hh-autoresponder/internal/llm"
 	"hh-autoresponder/internal/monitor"
@@ -43,19 +43,8 @@ func main() {
 	if len(active) > 0 {
 		acct = active[0]
 	} else {
-		logger.Info("no active accounts on startup, waiting for oauth login")
+		logger.Info("no active accounts on startup")
 	}
-
-	auth := hh.NewAuthManager(
-		cfg.HHClientID,
-		cfg.HHClientSecret,
-		cfg.HHRedirectURI,
-		[]string{"resumes", "negotiations", "vacancy_response"},
-		logger,
-		&acct.NeedsReauth,
-	)
-	auth.SetToken(acct.Token)
-	hhClient := hh.NewClient(&http.Client{Timeout: 60 * time.Second}, auth, logger)
 
 	llmClient, err := llm.NewProvider(cfg.LLMProvider, cfg.OpenAIAPIKey, cfg.DeepSeekAPIKey)
 	if err != nil {
@@ -79,8 +68,6 @@ func main() {
 	dailyLimiter := limiter.NewDailyLimiter(cfg.DailyApplyLimit)
 	stats := monitor.NewCollector()
 	hub := ws.NewHub()
-	applyWorker := worker.NewApplyWorker(hhClient, llmClient, dailyLimiter, filterChain, stats, hub, logger)
-	replyWorker := worker.NewReplyWorker(hhClient, llmClient, hub, logger)
 
 	resumeID := ""
 	if len(acct.ResumeIDs) > 0 {
@@ -90,20 +77,84 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	bm, err := browser.NewBrowserManager(ctx)
+	if err != nil {
+		logger.Error("init browser manager", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := bm.Close(); err != nil {
+			logger.Error("close browser manager", "error", err)
+		}
+	}()
+
+	var browserCtx *browser.AccountContext
+	if acct.ID != "" {
+		browserCtx, err = bm.AddAccount(acct.ID)
+		if err != nil {
+			logger.Error("add account browser context", "account", acct.ID, "error", err)
+		}
+	}
+
+	if browserCtx != nil {
+		loggedIn, err := browserCtx.IsLoggedIn()
+		if err != nil {
+			logger.Warn("check browser session", "account", acct.ID, "error", err)
+		}
+		if !loggedIn {
+			loginFailed := false
+			key, keyErr := account.LoadEncryptionKeyFromEnv()
+			if keyErr != nil {
+				logger.Error("load encryption key", "error", keyErr)
+				loginFailed = true
+			} else {
+				password, decErr := account.DecryptPassword(acct.Password, key)
+				if decErr != nil {
+					logger.Error("decrypt account password", "account", acct.ID, "error", decErr)
+					loginFailed = true
+				} else if err := browserCtx.Login(acct.Email, password); err != nil {
+					logger.Error("login failed", "account", acct.ID, "error", err)
+					loginFailed = true
+				}
+			}
+			if loginFailed && acct.ID != "" {
+				if err := acctMgr.Update(func(items *[]account.Account) error {
+					for i := range *items {
+						if (*items)[i].ID == acct.ID {
+							(*items)[i].NeedsReauth = true
+							return nil
+						}
+					}
+					return nil
+				}); err != nil {
+					logger.Error("flag account reauth required", "account", acct.ID, "error", err)
+				} else if err := acctMgr.Save(); err != nil {
+					logger.Error("save accounts after failed login", "account", acct.ID, "error", err)
+				}
+				browserCtx = nil
+			}
+		}
+	}
+
+	bm.SetNotifier(func(ctx context.Context, event string, payload any) error {
+		return hub.Broadcast(ctx, event, payload)
+	})
+	applyWorker := worker.NewApplyWorker(browserCtx, llmClient, dailyLimiter, filterChain, stats, hub, logger)
+	replyWorker := worker.NewReplyWorker(browserCtx, llmClient, hub, logger)
+
 	handlers := &httptransport.Handlers{
 		Ctx:         ctx,
-		Auth:        auth,
+		BrowserCtx:  browserCtx,
 		ApplyWorker: applyWorker,
 		ReplyWorker: replyWorker,
 		Stats:       stats,
 		Accounts:    acctMgr,
-		HHClient:    hhClient,
 		SearchURLs:  acct.SearchURLs,
 		ResumeID:    resumeID,
 	}
 	server := httptransport.NewServer(cfg.Port, handlers, hub)
 
-	sched := scheduler.New(hhClient, dailyLimiter, acct.ResumeIDs, logger)
+	sched := scheduler.New(browserCtx, dailyLimiter, acct.ResumeIDs, logger)
 	if err := sched.Start(ctx); err != nil {
 		logger.Error("start scheduler", "error", err)
 		os.Exit(1)
