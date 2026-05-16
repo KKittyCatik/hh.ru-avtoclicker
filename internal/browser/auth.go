@@ -11,54 +11,73 @@ import (
 	"github.com/playwright-community/playwright-go"
 )
 
-func (ac *AccountContext) Login(email, password string) error {
-	ctx, cancel := withTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	if _, err := ac.Page.Goto("https://hh.ru/account/login", playwright.PageGotoOptions{
-		Timeout:   playwright.Float(30000),
-		WaitUntil: playwright.WaitUntilStateLoad,
-	}); err != nil {
-		return fmt.Errorf("open login page: %w", err)
-	}
-
-	emailSelectors := []string{
+// All known selectors for hh.ru login page elements (ordered by preference).
+var (
+	loginEmailSelectors = []string{
 		`[data-qa="login-input-username"]`,
 		`[data-qa="account-signup-email"]`,
 		`input[name="login"]`,
 		`input[autocomplete="username"]`,
 		`input[type="email"]`,
+		`input[name="email"]`,
 	}
-	var emailFound bool
-	for _, sel := range emailSelectors {
-		if _, err := ac.Page.WaitForSelector(sel, playwright.PageWaitForSelectorOptions{
-			Timeout: playwright.Float(10000),
-			State:   playwright.WaitForSelectorStateVisible,
-		}); err == nil {
-			emailFound = true
-			break
-		}
-	}
-	if !emailFound {
-		_, _ = ac.Page.Screenshot(playwright.PageScreenshotOptions{
-			Path: playwright.String(fmt.Sprintf("debug/login_err_%s.png", time.Now().Format("20060102_150405.000"))),
-		})
-		return fmt.Errorf("login page did not load: no email input found")
-	}
-	if err := randomPause(ctx, 500*time.Millisecond, 2*time.Second); err != nil {
-		return fmt.Errorf("pause after page load: %w", err)
-	}
-
-	if err := fillFirstSelector(ac, emailSelectors, email); err != nil {
-		return fmt.Errorf("fill email: %w", err)
-	}
-
-	byPasswordSelectors := []string{
+	loginByPasswordSelectors = []string{
 		`[data-qa="expand-login-by-password"]`,
 		`[data-qa="login-by-password"]`,
 		`text=Войти по паролю`,
 	}
-	for _, sel := range byPasswordSelectors {
+	loginPasswordSelectors = []string{
+		`[data-qa="login-input-password"]`,
+		`[data-qa="account-login-password"]`,
+		`input[name="password"]`,
+		`input[type="password"]`,
+	}
+	loginSubmitSelectors = []string{
+		`[data-qa="login-submit"]`,
+		`[data-qa="account-login-submit"]`,
+		`button[type="submit"]`,
+	}
+	loggedInSelectors = []string{
+		`[data-qa="mainmenu_applicantProfile"]`,
+		`[data-qa="mainmenu_vacancyResponses"]`,
+		`[data-qa="user-logged-in"]`,
+		`a[href*="/applicant/"]`,
+		`a[href*="/my/"]`,
+	}
+)
+
+func (ac *AccountContext) Login(email, password string) error {
+	ctx, cancel := withTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	if _, err := ac.Page.Goto("https://hh.ru/account/login",
+		playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateDomcontentloaded},
+	); err != nil {
+		return fmt.Errorf("open login page: %w", err)
+	}
+
+	// Wait for page to fully settle
+	if err := randomPause(ctx, 1500*time.Millisecond, 3*time.Second); err != nil {
+		return fmt.Errorf("pause after goto: %w", err)
+	}
+
+	// Wait until at least one email input selector is visible (up to 15s)
+	if err := ac.waitForAnySelector(loginEmailSelectors, 15*time.Second); err != nil {
+		ac.screenshotDebug("login_no_email_input")
+		return fmt.Errorf("login page did not load: no email input found")
+	}
+
+	if err := fillFirstSelector(ac, loginEmailSelectors, email); err != nil {
+		ac.screenshotDebug("login_fill_email_failed")
+		return fmt.Errorf("fill email: %w", err)
+	}
+
+	if err := randomPause(ctx, 300*time.Millisecond, 800*time.Millisecond); err != nil {
+		return err
+	}
+
+	// Click "Login by password" button if present
+	for _, sel := range loginByPasswordSelectors {
 		if btn, _ := ac.Page.QuerySelector(sel); btn != nil {
 			_ = ac.clickLikeHuman(ctx, sel)
 			_ = randomPause(ctx, 500*time.Millisecond, 1*time.Second)
@@ -66,28 +85,33 @@ func (ac *AccountContext) Login(email, password string) error {
 		}
 	}
 
-	passwordSelectors := []string{
-		`[data-qa="login-input-password"]`,
-		`[data-qa="account-login-password"]`,
-		`input[name="password"]`,
-		`input[type="password"]`,
+	// Wait for password field to appear
+	if err := ac.waitForAnySelector(loginPasswordSelectors, 10*time.Second); err != nil {
+		ac.screenshotDebug("login_no_password_input")
+		return fmt.Errorf("password field did not appear: %w", err)
 	}
-	if err := typeFirstSelector(ac, passwordSelectors, password, 90); err != nil {
+
+	if err := typeFirstSelector(ac, loginPasswordSelectors, password, 90); err != nil {
+		ac.screenshotDebug("login_fill_password_failed")
 		return fmt.Errorf("fill password: %w", err)
 	}
 
-	submitSelectors := []string{
-		`[data-qa="login-submit"]`,
-		`[data-qa="account-login-submit"]`,
-		`button[type="submit"]`,
+	if err := randomPause(ctx, 300*time.Millisecond, 800*time.Millisecond); err != nil {
+		return err
 	}
-	if err := clickFirstSelector(ctx, ac, submitSelectors); err != nil {
+
+	if err := clickFirstSelector(ctx, ac, loginSubmitSelectors); err != nil {
+		ac.screenshotDebug("login_submit_failed")
 		return fmt.Errorf("submit login: %w", err)
 	}
 
-	if err := ac.Page.WaitForURL("https://hh.ru/**", playwright.PageWaitForURLOptions{Timeout: playwright.Float(loginWaitURLTimeoutMs)}); err != nil {
+	if err := ac.Page.WaitForURL("https://hh.ru/**", playwright.PageWaitForURLOptions{
+		Timeout: playwright.Float(loginWaitURLTimeoutMs),
+	}); err != nil {
+		ac.screenshotDebug("login_redirect_timeout")
 		return fmt.Errorf("wait for post-login redirect: %w", err)
 	}
+
 	if err := ac.waitCaptchaIfNeeded(ctx); err != nil {
 		return err
 	}
@@ -97,18 +121,18 @@ func (ac *AccountContext) Login(email, password string) error {
 		return fmt.Errorf("check login status: %w", err)
 	}
 	if !logged {
-		return fmt.Errorf("login failed: profile element not found")
+		ac.screenshotDebug("login_not_logged_in")
+		return fmt.Errorf("login failed: profile element not found after redirect")
 	}
 	ac.LoggedIn = true
 	return ac.SaveSession()
 }
 
 func (ac *AccountContext) IsLoggedIn() (bool, error) {
-	selectors := []string{`[data-qa="mainmenu_applicantProfile"]`, `[data-qa="mainmenu_vacancyResponses"]`, `a[href*="/applicant/"]`}
-	for _, selector := range selectors {
+	for _, selector := range loggedInSelectors {
 		el, err := ac.Page.QuerySelector(selector)
 		if err != nil {
-			return false, fmt.Errorf("query login selector %s: %w", selector, err)
+			continue
 		}
 		if el != nil {
 			ac.LoggedIn = true
@@ -128,6 +152,37 @@ func (ac *AccountContext) SaveSession() error {
 		return fmt.Errorf("save storage state: %w", err)
 	}
 	return nil
+}
+
+// waitForAnySelector waits until at least one selector from the list becomes visible.
+func (ac *AccountContext) waitForAnySelector(selectors []string, timeout time.Duration) error {
+	perSelector := timeout / time.Duration(len(selectors))
+	if perSelector < 3*time.Second {
+		perSelector = 3 * time.Second
+	}
+	for _, sel := range selectors {
+		_, err := ac.Page.WaitForSelector(sel, playwright.PageWaitForSelectorOptions{
+			Timeout: playwright.Float(float64(perSelector.Milliseconds())),
+			State:   playwright.WaitForSelectorStateVisible,
+		})
+		if err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("none of selectors appeared: %s", strings.Join(selectors, ", "))
+}
+
+// screenshotDebug saves a screenshot to the debug directory.
+func (ac *AccountContext) screenshotDebug(name string) {
+	_ = os.MkdirAll("debug", 0o755)
+	path := fmt.Sprintf("debug/%s_%s.png", name, time.Now().Format("20060102_150405"))
+	_, _ = ac.Page.Screenshot(playwright.PageScreenshotOptions{
+		Path:     playwright.String(path),
+		FullPage: playwright.Bool(true),
+	})
+	if ac.logger != nil {
+		ac.logger.Info("debug screenshot saved", "path", path)
+	}
 }
 
 func (ac *AccountContext) waitCaptchaIfNeeded(ctx context.Context) error {
