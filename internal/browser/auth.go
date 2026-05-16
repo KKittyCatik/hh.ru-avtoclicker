@@ -41,7 +41,7 @@ func (ac *AccountContext) Login(email, password string) error {
 		return fmt.Errorf("submit login: %w", err)
 	}
 
-	if err := ac.Page.WaitForURL("https://hh.ru/**", playwright.PageWaitForURLOptions{Timeout: playwright.Float(15000)}); err != nil {
+	if err := ac.Page.WaitForURL("https://hh.ru/**", playwright.PageWaitForURLOptions{Timeout: playwright.Float(loginWaitURLTimeoutMs)}); err != nil {
 		return fmt.Errorf("wait for post-login redirect: %w", err)
 	}
 	if err := ac.waitCaptchaIfNeeded(ctx); err != nil {

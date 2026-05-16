@@ -55,7 +55,10 @@ func (ac *AccountContext) ApplyToVacancy(ctx context.Context, vacancyID string, 
 		}
 	}
 	if strings.TrimSpace(coverLetter) != "" {
-		_ = ac.typeLikeHuman(`[data-qa="vacancy-response-popup-cover-letter"]`, coverLetter, 70)
+		if err := ac.typeLikeHuman(`[data-qa="vacancy-response-popup-cover-letter"]`, coverLetter, 70); err != nil {
+			result.Error = err.Error()
+			return result, fmt.Errorf("type cover letter: %w", err)
+		}
 	}
 
 	questionnaire, _ := ac.Page.QuerySelector(`[data-qa="task-body"]`)

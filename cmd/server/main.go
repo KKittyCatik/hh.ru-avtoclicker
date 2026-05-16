@@ -102,16 +102,36 @@ func main() {
 			logger.Warn("check browser session", "account", acct.ID, "error", err)
 		}
 		if !loggedIn {
+			loginFailed := false
 			key, keyErr := account.LoadEncryptionKeyFromEnv()
 			if keyErr != nil {
 				logger.Error("load encryption key", "error", keyErr)
+				loginFailed = true
 			} else {
 				password, decErr := account.DecryptPassword(acct.Password, key)
 				if decErr != nil {
 					logger.Error("decrypt account password", "account", acct.ID, "error", decErr)
+					loginFailed = true
 				} else if err := browserCtx.Login(acct.Email, password); err != nil {
 					logger.Error("login failed", "account", acct.ID, "error", err)
+					loginFailed = true
 				}
+			}
+			if loginFailed && acct.ID != "" {
+				if err := acctMgr.Update(func(items *[]account.Account) error {
+					for i := range *items {
+						if (*items)[i].ID == acct.ID {
+							(*items)[i].NeedsReauth = true
+							return nil
+						}
+					}
+					return nil
+				}); err != nil {
+					logger.Error("flag account reauth required", "account", acct.ID, "error", err)
+				} else if err := acctMgr.Save(); err != nil {
+					logger.Error("save accounts after failed login", "account", acct.ID, "error", err)
+				}
+				browserCtx = nil
 			}
 		}
 	}

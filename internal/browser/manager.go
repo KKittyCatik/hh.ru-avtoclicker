@@ -15,6 +15,8 @@ import (
 
 const (
 	defaultOpTimeout = 30 * time.Second
+	// 15000ms (15s) timeout for login redirect wait after submit.
+	loginWaitURLTimeoutMs = 15000
 )
 
 // BrowserManager управляет пулом браузерных контекстов (по одному на аккаунт)
@@ -37,10 +39,24 @@ type AccountContext struct {
 }
 
 func NewBrowserManager(ctx context.Context) (*BrowserManager, error) {
-	_ = ctx
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("init browser manager canceled: %w", ctx.Err())
+		default:
+		}
+	}
 	pw, err := playwright.Run()
 	if err != nil {
 		return nil, fmt.Errorf("run playwright: %w", err)
+	}
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			_ = pw.Stop()
+			return nil, fmt.Errorf("init browser manager canceled: %w", ctx.Err())
+		default:
+		}
 	}
 
 	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
@@ -180,7 +196,7 @@ func waitForSelectorWithDebug(page playwright.Page, selector string, timeout tim
 		return handle, nil
 	}
 	_ = os.MkdirAll("debug", 0o755)
-	path := fmt.Sprintf("debug/err_%s.png", time.Now().Format("150405"))
+	path := fmt.Sprintf("debug/err_%s.png", time.Now().Format("20060102_150405.000"))
 	_, _ = page.Screenshot(playwright.PageScreenshotOptions{Path: playwright.String(path)})
 	return nil, fmt.Errorf("wait for selector %s: %w", selector, err)
 }

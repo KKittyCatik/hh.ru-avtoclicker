@@ -103,6 +103,10 @@ func (m *Manager) GetActive() []Account {
 }
 
 func EncryptPassword(plain string, key []byte) (string, error) {
+	if strings.TrimSpace(plain) == "" {
+		return "", fmt.Errorf("password cannot be empty")
+	}
+	// AES-256-GCM requires a 32-byte key.
 	if len(key) != 32 {
 		return "", fmt.Errorf("invalid encryption key size: got %d, expected 32", len(key))
 	}
@@ -123,6 +127,7 @@ func EncryptPassword(plain string, key []byte) (string, error) {
 }
 
 func DecryptPassword(encrypted string, key []byte) (string, error) {
+	// AES-256-GCM requires a 32-byte key.
 	if len(key) != 32 {
 		return "", fmt.Errorf("invalid encryption key size: got %d, expected 32", len(key))
 	}

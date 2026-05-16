@@ -46,11 +46,17 @@ func (ac *AccountContext) PublishResume(ctx context.Context, resumeID string) er
 }
 
 func (ac *AccountContext) GetNextPublishTime(ctx context.Context, resumeID string) (time.Time, error) {
-	_, cancel := withTimeout(ctx, defaultOpTimeout)
+	tctx, cancel := withTimeout(ctx, defaultOpTimeout)
 	defer cancel()
+	if err := tctx.Err(); err != nil {
+		return time.Time{}, err
+	}
 
 	if _, err := ac.Page.Goto(fmt.Sprintf("https://hh.ru/resume/%s", resumeID)); err != nil {
 		return time.Time{}, fmt.Errorf("open resume page: %w", err)
+	}
+	if err := tctx.Err(); err != nil {
+		return time.Time{}, err
 	}
 	pageText, err := ac.Page.TextContent("body")
 	if err != nil {

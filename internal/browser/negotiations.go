@@ -75,13 +75,13 @@ func (ac *AccountContext) GetMessages(ctx context.Context, negotiationURL string
 		msg := hh.Message{ID: fmt.Sprintf("msg-%d", idx), Text: strings.TrimSpace(text), From: strings.TrimSpace(from)}
 
 		buttons, _ := node.QuerySelectorAll(`button`)
-		for bi, btn := range buttons {
+		for _, btn := range buttons {
 			bt, _ := btn.TextContent()
 			bt = strings.TrimSpace(bt)
 			if bt == "" {
 				continue
 			}
-			msg.Options = append(msg.Options, hh.MessageOption{ID: fmt.Sprintf("btn-%d", bi), Text: bt})
+			msg.Options = append(msg.Options, hh.MessageOption{ID: bt, Text: bt})
 		}
 		messages = append(messages, msg)
 	}

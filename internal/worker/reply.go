@@ -53,7 +53,7 @@ func (w *ReplyWorker) ProcessNegotiations(ctx context.Context, resume string, va
 		}
 		last := messages[len(messages)-1]
 		if bot_detector.IsBot(last) && len(last.Options) > 0 {
-			err := w.browserCtx.ClickBotButton(ctx, n.ID, last.Options[0].Text)
+			err := w.browserCtx.ClickBotButton(ctx, n.ID, last.Options[0].ID)
 			if err != nil {
 				return fmt.Errorf("send quick reply for %s: %w", n.ID, err)
 			}
