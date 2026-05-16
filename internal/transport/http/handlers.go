@@ -2,9 +2,12 @@ package httptransport
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -16,6 +19,7 @@ import (
 
 type Handlers struct {
 	Ctx         context.Context
+	Auth        *hh.AuthManager
 	ApplyWorker *worker.ApplyWorker
 	ReplyWorker *worker.ReplyWorker
 	Stats       *monitor.Collector
@@ -23,6 +27,128 @@ type Handlers struct {
 	HHClient    *hh.Client
 	SearchURLs  []string
 	ResumeID    string
+	states      *stateStore
+}
+
+func (h *Handlers) Init() {
+	if h.states == nil {
+		h.states = newStateStore()
+	}
+}
+
+func (h *Handlers) AuthLogin(w http.ResponseWriter, r *http.Request) {
+	if h.Auth == nil {
+		h.writeError(w, http.StatusServiceUnavailable, fmt.Errorf("oauth is not configured"))
+		return
+	}
+	if h.states == nil {
+		h.states = newStateStore()
+	}
+
+	state, err := generateRandomState()
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, fmt.Errorf("generate oauth state: %w", err))
+		return
+	}
+	h.states.Set(state)
+	http.Redirect(w, r, h.Auth.AuthCodeURL(state), http.StatusTemporaryRedirect)
+}
+
+func (h *Handlers) AuthCallback(w http.ResponseWriter, r *http.Request) {
+	if h.Auth == nil {
+		h.writeError(w, http.StatusServiceUnavailable, fmt.Errorf("oauth is not configured"))
+		return
+	}
+	if h.states == nil {
+		h.states = newStateStore()
+	}
+
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	state := strings.TrimSpace(r.URL.Query().Get("state"))
+	if code == "" || state == "" {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("missing oauth callback parameters"))
+		return
+	}
+	if !h.states.Validate(state) {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid oauth state"))
+		return
+	}
+
+	ctx := r.Context()
+	token, err := h.Auth.ExchangeCode(ctx, code)
+	if err != nil {
+		h.writeError(w, http.StatusBadGateway, fmt.Errorf("exchange oauth code: %w", err))
+		return
+	}
+
+	me, err := h.HHClient.GetMe(ctx)
+	if err != nil {
+		h.writeError(w, http.StatusBadGateway, fmt.Errorf("fetch profile: %w", err))
+		return
+	}
+	if strings.TrimSpace(me.ID) == "" {
+		h.writeError(w, http.StatusBadGateway, fmt.Errorf("fetch profile: missing user id"))
+		return
+	}
+	resumes, err := h.HHClient.GetMyResumes(ctx)
+	if err != nil {
+		h.writeError(w, http.StatusBadGateway, fmt.Errorf("fetch resumes: %w", err))
+		return
+	}
+
+	resumeIDs := make([]string, 0, len(resumes))
+	for _, resume := range resumes {
+		if resume.ID != "" {
+			resumeIDs = append(resumeIDs, resume.ID)
+		}
+	}
+
+	name := strings.TrimSpace(me.FirstName + " " + me.LastName)
+	if name == "" {
+		name = strings.TrimSpace(me.Email)
+	}
+	if name == "" {
+		name = me.ID
+	}
+
+	newAccount := account.Account{
+		ID:        me.ID,
+		Name:      name,
+		Token:     token,
+		ResumeIDs: resumeIDs,
+	}
+
+	if err := h.Accounts.Update(func(items *[]account.Account) error {
+		for i := range *items {
+			if (*items)[i].ID != me.ID {
+				continue
+			}
+			existing := (*items)[i]
+			existing.Name = newAccount.Name
+			existing.Token = newAccount.Token
+			existing.ResumeIDs = newAccount.ResumeIDs
+			existing.NeedsReauth = false
+			(*items)[i] = existing
+			return nil
+		}
+		*items = append(*items, newAccount)
+		return nil
+	}); err != nil {
+		h.writeError(w, http.StatusInternalServerError, fmt.Errorf("update account: %w", err))
+		return
+	}
+	if err := h.Accounts.Save(); err != nil {
+		h.writeError(w, http.StatusInternalServerError, fmt.Errorf("save accounts: %w", err))
+		return
+	}
+
+	h.Auth.SetToken(token)
+	h.ResumeID = ""
+	if len(resumeIDs) > 0 {
+		h.ResumeID = resumeIDs[0]
+	}
+
+	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 }
 
 func (h *Handlers) StartApply(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +253,14 @@ func (h *Handlers) TriggerReplies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeJSON(w, http.StatusOK, map[string]string{"status": "processed"})
+}
+
+func generateRandomState() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate random bytes: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func (h *Handlers) writeJSON(w http.ResponseWriter, code int, payload any) {

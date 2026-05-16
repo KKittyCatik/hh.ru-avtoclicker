@@ -46,8 +46,18 @@ func NewClient(httpClient *http.Client, tokenSource TokenSource, logger *slog.Lo
 }
 
 func (c *Client) DoJSON(ctx context.Context, method, path string, body any, out any) error {
-	if err := c.randomDelay(ctx); err != nil {
-		return fmt.Errorf("wait random delay: %w", err)
+	return c.doJSON(ctx, method, path, body, out, true)
+}
+
+func (c *Client) DoJSONFast(ctx context.Context, method, path string, body any, out any) error {
+	return c.doJSON(ctx, method, path, body, out, false)
+}
+
+func (c *Client) doJSON(ctx context.Context, method, path string, body any, out any, withDelay bool) error {
+	if withDelay {
+		if err := c.randomDelay(ctx); err != nil {
+			return fmt.Errorf("wait random delay: %w", err)
+		}
 	}
 
 	var payload []byte

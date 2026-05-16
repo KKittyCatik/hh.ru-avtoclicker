@@ -16,6 +16,8 @@ import (
 )
 
 func NewServer(addr string, handlers *Handlers, hub *ws.Hub) *http.Server {
+	handlers.Init()
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -23,8 +25,10 @@ func NewServer(addr string, handlers *Handlers, hub *ws.Hub) *http.Server {
 	r.Use(middleware.Logger)
 
 	r.Get("/ws", hub.ServeHTTP)
+	r.Get("/callback", handlers.AuthCallback)
 
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/auth/login", handlers.AuthLogin)
 		r.Post("/apply/start", handlers.StartApply)
 		r.Post("/apply/stop", handlers.StopApply)
 		r.Get("/stats", handlers.GetStats)

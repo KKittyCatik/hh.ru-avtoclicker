@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,8 +45,13 @@ func (m *Manager) Load() error {
 		return fmt.Errorf("read accounts file: %w", err)
 	}
 	var items []Account
-	if err := json.Unmarshal(b, &items); err != nil {
-		return fmt.Errorf("unmarshal accounts file: %w", err)
+	if strings.TrimSpace(string(b)) != "" {
+		if err := json.Unmarshal(b, &items); err != nil {
+			return fmt.Errorf("unmarshal accounts file: %w", err)
+		}
+	}
+	if items == nil {
+		items = []Account{}
 	}
 	m.mu.Lock()
 	m.accounts = items
@@ -94,10 +100,10 @@ func (m *Manager) GetActive() []Account {
 	return active
 }
 
-func (m *Manager) Update(mutator func(items []Account) error) error {
+func (m *Manager) Update(mutator func(items *[]Account) error) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := mutator(m.accounts); err != nil {
+	if err := mutator(&m.accounts); err != nil {
 		return fmt.Errorf("mutate accounts: %w", err)
 	}
 	return nil
