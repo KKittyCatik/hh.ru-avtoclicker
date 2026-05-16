@@ -41,9 +41,6 @@ func (h *Handlers) AuthLogin(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusServiceUnavailable, fmt.Errorf("oauth is not configured"))
 		return
 	}
-	if h.states == nil {
-		h.states = newStateStore()
-	}
 
 	state, err := generateRandomState()
 	if err != nil {
@@ -58,9 +55,6 @@ func (h *Handlers) AuthCallback(w http.ResponseWriter, r *http.Request) {
 	if h.Auth == nil {
 		h.writeError(w, http.StatusServiceUnavailable, fmt.Errorf("oauth is not configured"))
 		return
-	}
-	if h.states == nil {
-		h.states = newStateStore()
 	}
 
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
