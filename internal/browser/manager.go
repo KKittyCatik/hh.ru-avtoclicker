@@ -46,6 +46,12 @@ func NewBrowserManager(ctx context.Context) (*BrowserManager, error) {
 		default:
 		}
 	}
+	if err := playwright.Install(&playwright.RunOptions{
+		Browsers: []string{"chromium"},
+		Verbose:  false,
+	}); err != nil {
+		return nil, fmt.Errorf("install playwright: %w", err)
+	}
 	pw, err := playwright.Run()
 	if err != nil {
 		return nil, fmt.Errorf("run playwright: %w", err)
