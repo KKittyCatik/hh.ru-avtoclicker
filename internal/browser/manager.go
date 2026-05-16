@@ -70,6 +70,21 @@ func NewBrowserManager(ctx context.Context) (*BrowserManager, error) {
 
 	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
 		Headless: playwright.Bool(true),
+		Args: []string{
+			// Required when running as root inside Docker
+			"--no-sandbox",
+			"--disable-setuid-sandbox",
+			// Stability in containerised environments
+			"--disable-dev-shm-usage",
+			"--disable-gpu",
+			"--no-first-run",
+			"--no-zygote",
+			// Anti-headless-detection
+			"--disable-blink-features=AutomationControlled",
+			"--disable-infobars",
+			"--window-size=1366,768",
+			"--start-maximized",
+		},
 	})
 	if err != nil {
 		_ = pw.Stop()
@@ -102,24 +117,38 @@ func (m *BrowserManager) AddAccount(accountID string) (*AccountContext, error) {
 		statePathOption = playwright.String(statePath)
 	}
 
-	ctx, err := m.browser.NewContext(playwright.BrowserNewContextOptions{
+	bCtx, err := m.browser.NewContext(playwright.BrowserNewContextOptions{
 		UserAgent:        playwright.String("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 		Viewport:         &playwright.Size{Width: 1366, Height: 768},
 		Locale:           playwright.String("ru-RU"),
 		TimezoneId:       playwright.String("Europe/Moscow"),
 		StorageStatePath: statePathOption,
+		// Disable webdriver flag that sites use to detect automation
+		JavaScriptEnabled: playwright.Bool(true),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create browser context: %w", err)
 	}
 
-	page, err := ctx.NewPage()
+	// Patch navigator.webdriver = false
+	if err := bCtx.AddInitScript(playwright.Script{
+		Content: playwright.String(`
+			Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+			Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+			Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
+		`),
+	}); err != nil {
+		_ = bCtx.Close()
+		return nil, fmt.Errorf("add init script: %w", err)
+	}
+
+	page, err := bCtx.NewPage()
 	if err != nil {
-		_ = ctx.Close()
+		_ = bCtx.Close()
 		return nil, fmt.Errorf("create page: %w", err)
 	}
 
-	ac := &AccountContext{AccountID: accountID, Context: ctx, Page: page, logger: m.logger, notify: m.notify}
+	ac := &AccountContext{AccountID: accountID, Context: bCtx, Page: page, logger: m.logger, notify: m.notify}
 	m.contexts[accountID] = ac
 	return ac, nil
 }
