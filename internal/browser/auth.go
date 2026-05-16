@@ -20,6 +20,7 @@ var (
 		`input[autocomplete="username"]`,
 		`input[type="email"]`,
 		`input[name="email"]`,
+		`input[type="text"]`,
 	}
 	loginByPasswordSelectors = []string{
 		`[data-qa="expand-login-by-password"]`,
@@ -47,22 +48,36 @@ var (
 )
 
 func (ac *AccountContext) Login(email, password string) error {
-	ctx, cancel := withTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := withTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
+	// Wait for full network idle so JS-rendered form elements appear
 	if _, err := ac.Page.Goto("https://hh.ru/account/login",
-		playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateDomcontentloaded},
+		playwright.PageGotoOptions{
+			WaitUntil: playwright.WaitUntilStateNetworkidle,
+			Timeout:   playwright.Float(30000),
+		},
 	); err != nil {
-		return fmt.Errorf("open login page: %w", err)
+		// Fallback: try without networkidle
+		if _, err2 := ac.Page.Goto("https://hh.ru/account/login",
+			playwright.PageGotoOptions{WaitUntil: playwright.WaitUntilStateDomcontentloaded},
+		); err2 != nil {
+			return fmt.Errorf("open login page: %w", err2)
+		}
 	}
 
-	// Wait for page to fully settle
-	if err := randomPause(ctx, 1500*time.Millisecond, 3*time.Second); err != nil {
+	// Extra wait for JS to render the form
+	if err := randomPause(ctx, 2*time.Second, 4*time.Second); err != nil {
 		return fmt.Errorf("pause after goto: %w", err)
 	}
 
-	// Wait until at least one email input selector is visible (up to 15s)
-	if err := ac.waitForAnySelector(loginEmailSelectors, 15*time.Second); err != nil {
+	// Log current URL for debugging
+	if ac.logger != nil {
+		ac.logger.Info("login page loaded", "url", ac.Page.URL())
+	}
+
+	// Wait until at least one email input selector is visible (up to 30s total)
+	if err := ac.waitForAnySelector(loginEmailSelectors, 30*time.Second); err != nil {
 		ac.screenshotDebug("login_no_email_input")
 		ac.htmlDebug("login_no_email_input")
 		return fmt.Errorf("login page did not load: no email input found")
@@ -74,7 +89,7 @@ func (ac *AccountContext) Login(email, password string) error {
 		return fmt.Errorf("fill email: %w", err)
 	}
 
-	if err := randomPause(ctx, 300*time.Millisecond, 800*time.Millisecond); err != nil {
+	if err := randomPause(ctx, 500*time.Millisecond, 1*time.Second); err != nil {
 		return err
 	}
 
@@ -82,13 +97,13 @@ func (ac *AccountContext) Login(email, password string) error {
 	for _, sel := range loginByPasswordSelectors {
 		if btn, _ := ac.Page.QuerySelector(sel); btn != nil {
 			_ = ac.clickLikeHuman(ctx, sel)
-			_ = randomPause(ctx, 500*time.Millisecond, 1*time.Second)
+			_ = randomPause(ctx, 800*time.Millisecond, 1500*time.Millisecond)
 			break
 		}
 	}
 
 	// Wait for password field to appear
-	if err := ac.waitForAnySelector(loginPasswordSelectors, 10*time.Second); err != nil {
+	if err := ac.waitForAnySelector(loginPasswordSelectors, 15*time.Second); err != nil {
 		ac.screenshotDebug("login_no_password_input")
 		ac.htmlDebug("login_no_password_input")
 		return fmt.Errorf("password field did not appear: %w", err)
@@ -99,7 +114,7 @@ func (ac *AccountContext) Login(email, password string) error {
 		return fmt.Errorf("fill password: %w", err)
 	}
 
-	if err := randomPause(ctx, 300*time.Millisecond, 800*time.Millisecond); err != nil {
+	if err := randomPause(ctx, 500*time.Millisecond, 1*time.Second); err != nil {
 		return err
 	}
 
@@ -108,7 +123,8 @@ func (ac *AccountContext) Login(email, password string) error {
 		return fmt.Errorf("submit login: %w", err)
 	}
 
-	if err := ac.Page.WaitForURL("https://hh.ru/**", playwright.PageWaitForURLOptions{
+	// hh.ru uses regional subdomains (e.g. ekaterinburg.hh.ru), match any *.hh.ru
+	if err := ac.Page.WaitForURL("**hh.ru/**", playwright.PageWaitForURLOptions{
 		Timeout: playwright.Float(loginWaitURLTimeoutMs),
 	}); err != nil {
 		ac.screenshotDebug("login_redirect_timeout")
@@ -160,9 +176,10 @@ func (ac *AccountContext) SaveSession() error {
 
 // waitForAnySelector waits until at least one selector from the list becomes visible.
 func (ac *AccountContext) waitForAnySelector(selectors []string, timeout time.Duration) error {
+	// Try each selector with up to 5s each, but respect total timeout
 	perSelector := timeout / time.Duration(len(selectors))
-	if perSelector < 3*time.Second {
-		perSelector = 3 * time.Second
+	if perSelector < 5*time.Second {
+		perSelector = 5 * time.Second
 	}
 	for _, sel := range selectors {
 		_, err := ac.Page.WaitForSelector(sel, playwright.PageWaitForSelectorOptions{
@@ -170,6 +187,9 @@ func (ac *AccountContext) waitForAnySelector(selectors []string, timeout time.Du
 			State:   playwright.WaitForSelectorStateVisible,
 		})
 		if err == nil {
+			if ac.logger != nil {
+				ac.logger.Info("selector found", "selector", sel)
+			}
 			return nil
 		}
 	}
@@ -194,19 +214,13 @@ func (ac *AccountContext) htmlDebug(name string) {
 	_ = os.MkdirAll("debug", 0o755)
 	ts := time.Now().Format("20060102_150405")
 
-	// Save current URL
 	currentURL := ac.Page.URL()
-
-	// Get page HTML
 	html, err := ac.Page.Content()
 	if err != nil {
 		html = fmt.Sprintf("error getting content: %v", err)
 	}
-
-	// Get page title
 	title, _ := ac.Page.Title()
 
-	// Write summary file (small, readable in terminal)
 	summaryPath := fmt.Sprintf("debug/%s_%s.txt", name, ts)
 	summary := fmt.Sprintf("URL: %s\nTitle: %s\n\n--- HTML (first 4000 chars) ---\n%s\n",
 		currentURL, title, truncate(html, 4000))
