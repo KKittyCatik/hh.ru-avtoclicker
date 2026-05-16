@@ -97,7 +97,14 @@ func (h *Handlers) AuthCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	name := strings.TrimSpace(me.FirstName + " " + me.LastName)
+	nameParts := make([]string, 0, 2)
+	if first := strings.TrimSpace(me.FirstName); first != "" {
+		nameParts = append(nameParts, first)
+	}
+	if last := strings.TrimSpace(me.LastName); last != "" {
+		nameParts = append(nameParts, last)
+	}
+	name := strings.Join(nameParts, " ")
 	if name == "" {
 		name = strings.TrimSpace(me.Email)
 	}
