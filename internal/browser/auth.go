@@ -15,28 +15,72 @@ func (ac *AccountContext) Login(email, password string) error {
 	ctx, cancel := withTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	if _, err := ac.Page.Goto("https://hh.ru/account/login"); err != nil {
+	if _, err := ac.Page.Goto("https://hh.ru/account/login", playwright.PageGotoOptions{
+		Timeout:   playwright.Float(30000),
+		WaitUntil: playwright.WaitUntilStateLoad,
+	}); err != nil {
 		return fmt.Errorf("open login page: %w", err)
 	}
+
+	emailSelectors := []string{
+		`[data-qa="login-input-username"]`,
+		`[data-qa="account-signup-email"]`,
+		`input[name="login"]`,
+		`input[autocomplete="username"]`,
+		`input[type="email"]`,
+	}
+	var emailFound bool
+	for _, sel := range emailSelectors {
+		if _, err := ac.Page.WaitForSelector(sel, playwright.PageWaitForSelectorOptions{
+			Timeout: playwright.Float(10000),
+			State:   playwright.WaitForSelectorStateVisible,
+		}); err == nil {
+			emailFound = true
+			break
+		}
+	}
+	if !emailFound {
+		_, _ = ac.Page.Screenshot(playwright.PageScreenshotOptions{
+			Path: playwright.String(fmt.Sprintf("debug/login_err_%s.png", time.Now().Format("20060102_150405.000"))),
+		})
+		return fmt.Errorf("login page did not load: no email input found")
+	}
 	if err := randomPause(ctx, 500*time.Millisecond, 2*time.Second); err != nil {
-		return fmt.Errorf("pause after goto: %w", err)
+		return fmt.Errorf("pause after page load: %w", err)
 	}
 
-	emailSelectors := []string{`[data-qa="account-signup-email"]`, `input[name="email"]`, `input[type="email"]`}
 	if err := fillFirstSelector(ac, emailSelectors, email); err != nil {
 		return fmt.Errorf("fill email: %w", err)
 	}
 
-	if loginByPasswordBtn, _ := ac.Page.QuerySelector(`text=Войти по паролю`); loginByPasswordBtn != nil {
-		_ = ac.clickLikeHuman(ctx, `text=Войти по паролю`)
+	byPasswordSelectors := []string{
+		`[data-qa="expand-login-by-password"]`,
+		`[data-qa="login-by-password"]`,
+		`text=Войти по паролю`,
+	}
+	for _, sel := range byPasswordSelectors {
+		if btn, _ := ac.Page.QuerySelector(sel); btn != nil {
+			_ = ac.clickLikeHuman(ctx, sel)
+			_ = randomPause(ctx, 500*time.Millisecond, 1*time.Second)
+			break
+		}
 	}
 
-	passwordSelectors := []string{`[data-qa="account-login-password"]`, `input[name="password"]`, `input[type="password"]`}
+	passwordSelectors := []string{
+		`[data-qa="login-input-password"]`,
+		`[data-qa="account-login-password"]`,
+		`input[name="password"]`,
+		`input[type="password"]`,
+	}
 	if err := typeFirstSelector(ac, passwordSelectors, password, 90); err != nil {
 		return fmt.Errorf("fill password: %w", err)
 	}
 
-	submitSelectors := []string{`[data-qa="account-login-submit"]`, `button[type="submit"]`}
+	submitSelectors := []string{
+		`[data-qa="login-submit"]`,
+		`[data-qa="account-login-submit"]`,
+		`button[type="submit"]`,
+	}
 	if err := clickFirstSelector(ctx, ac, submitSelectors); err != nil {
 		return fmt.Errorf("submit login: %w", err)
 	}

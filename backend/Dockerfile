@@ -29,17 +29,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdg-utils && \
     rm -rf /var/lib/apt/lists/*
 
-RUN groupadd -r appgroup && useradd -r -g appgroup -m -d /home/appuser appuser
-
 WORKDIR /app
 
 COPY --from=builder /app/server .
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
-
-RUN chown -R appuser:appgroup /app
-RUN mkdir -p /home/appuser/.cache && chown -R appuser:appgroup /home/appuser/.cache
-
-USER appuser
 
 EXPOSE 8080
 

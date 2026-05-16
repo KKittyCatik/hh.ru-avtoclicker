@@ -52,6 +52,9 @@ func NewBrowserManager(ctx context.Context) (*BrowserManager, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("install playwright: %w", err)
 	}
+	if err := os.MkdirAll("debug", 0o755); err != nil {
+		return nil, fmt.Errorf("create debug dir: %w", err)
+	}
 	pw, err := playwright.Run()
 	if err != nil {
 		return nil, fmt.Errorf("run playwright: %w", err)

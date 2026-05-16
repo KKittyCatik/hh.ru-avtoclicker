@@ -21,7 +21,7 @@ services:
       ACCOUNTS_FILE: /data/accounts.json
     volumes:
       - ./accounts.json:/data/accounts.json
-      - playwright-data:/home/appuser/.cache
+      - playwright-data:/root/.cache
     shm_size: '256mb'
     networks:
       - app-network
