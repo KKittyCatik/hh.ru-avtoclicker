@@ -39,13 +39,21 @@ func main() {
 		os.Exit(1)
 	}
 	active := acctMgr.GetActive()
-	if len(active) == 0 {
-		logger.Error("no active accounts")
-		os.Exit(1)
+	var acct account.Account
+	if len(active) > 0 {
+		acct = active[0]
+	} else {
+		logger.Info("no active accounts on startup, waiting for oauth login")
 	}
-	acct := active[0]
 
-	auth := hh.NewAuthManager(cfg.HHClientID, cfg.HHClientSecret, cfg.HHRedirectURI, nil, logger, &acct.NeedsReauth)
+	auth := hh.NewAuthManager(
+		cfg.HHClientID,
+		cfg.HHClientSecret,
+		cfg.HHRedirectURI,
+		[]string{"resumes", "negotiations", "vacancy_response"},
+		logger,
+		&acct.NeedsReauth,
+	)
 	auth.SetToken(acct.Token)
 	hhClient := hh.NewClient(&http.Client{Timeout: 60 * time.Second}, auth, logger)
 
@@ -84,6 +92,7 @@ func main() {
 
 	handlers := &httptransport.Handlers{
 		Ctx:         ctx,
+		Auth:        auth,
 		ApplyWorker: applyWorker,
 		ReplyWorker: replyWorker,
 		Stats:       stats,

@@ -1,4 +1,4 @@
-import { ExternalLink, Wifi } from 'lucide-react';
+import { Wifi } from 'lucide-react';
 
 import { ResumePublishButton } from '@/components/accounts/ResumePublishButton';
 import { GlowCard } from '@/components/ui/GlowCard';
@@ -32,8 +32,7 @@ export function AccountCard({ account }: { account: Account }) {
       <div className="mt-5 flex flex-wrap gap-3">
         <ResumePublishButton />
         {account.needs_reauth ? (
-          <a className="inline-flex items-center gap-2 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-2 text-sm font-medium text-rose-200 transition hover:bg-rose-500/15" href="https://hh.ru" rel="noreferrer" target="_blank">
-            <ExternalLink className="h-4 w-4" />
+          <a className="inline-flex items-center gap-2 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-2 text-sm font-medium text-rose-200 transition hover:bg-rose-500/15" href="/api/auth/login">
             Reconnect
           </a>
         ) : null}

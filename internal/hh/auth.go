@@ -25,6 +25,9 @@ func NewAuthManager(clientID, clientSecret, redirectURL string, scopes []string,
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if len(scopes) == 0 {
+		scopes = []string{"resumes", "negotiations", "vacancy_response"}
+	}
 	return &AuthManager{
 		oauthConfig: &oauth2.Config{
 			ClientID:     clientID,
