@@ -6,16 +6,16 @@ import (
 	"log/slog"
 
 	"hh-autoresponder/internal/bot_detector"
-	"hh-autoresponder/internal/hh"
+	"hh-autoresponder/internal/browser"
 	"hh-autoresponder/internal/llm"
 	"hh-autoresponder/internal/transport/ws"
 )
 
 type ReplyWorker struct {
-	hhClient  *hh.Client
-	llmClient llm.LLMClient
-	hub       *ws.Hub
-	logger    *slog.Logger
+	browserCtx *browser.AccountContext
+	llmClient  llm.LLMClient
+	hub        *ws.Hub
+	logger     *slog.Logger
 }
 
 type DraftReply struct {
@@ -25,15 +25,18 @@ type DraftReply struct {
 	IsBotFlow          bool   `json:"isBotFlow"`
 }
 
-func NewReplyWorker(hhClient *hh.Client, llmClient llm.LLMClient, hub *ws.Hub, logger *slog.Logger) *ReplyWorker {
+func NewReplyWorker(browserCtx *browser.AccountContext, llmClient llm.LLMClient, hub *ws.Hub, logger *slog.Logger) *ReplyWorker {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ReplyWorker{hhClient: hhClient, llmClient: llmClient, hub: hub, logger: logger}
+	return &ReplyWorker{browserCtx: browserCtx, llmClient: llmClient, hub: hub, logger: logger}
 }
 
 func (w *ReplyWorker) ProcessNegotiations(ctx context.Context, resume string, vacancyDescription string) error {
-	negotiations, err := w.hhClient.ListNegotiations(ctx)
+	if w.browserCtx == nil {
+		return fmt.Errorf("browser context is not configured")
+	}
+	negotiations, err := w.browserCtx.GetNegotiations(ctx)
 	if err != nil {
 		return fmt.Errorf("list negotiations for reply worker: %w", err)
 	}
@@ -41,7 +44,7 @@ func (w *ReplyWorker) ProcessNegotiations(ctx context.Context, resume string, va
 		if !n.NeedsReply {
 			continue
 		}
-		messages, err := w.hhClient.ListNegotiationMessages(ctx, n.ID)
+		messages, err := w.browserCtx.GetMessages(ctx, n.ID)
 		if err != nil {
 			return fmt.Errorf("list messages for %s: %w", n.ID, err)
 		}
@@ -50,7 +53,7 @@ func (w *ReplyWorker) ProcessNegotiations(ctx context.Context, resume string, va
 		}
 		last := messages[len(messages)-1]
 		if bot_detector.IsBot(last) && len(last.Options) > 0 {
-			err := w.hhClient.SendNegotiationReply(ctx, n.ID, hh.SendReplyRequest{QuickReplyOptionID: last.Options[0].ID})
+			err := w.browserCtx.ClickBotButton(ctx, n.ID, last.Options[0].Text)
 			if err != nil {
 				return fmt.Errorf("send quick reply for %s: %w", n.ID, err)
 			}
@@ -65,7 +68,7 @@ func (w *ReplyWorker) ProcessNegotiations(ctx context.Context, resume string, va
 			w.logger.Info("negotiation requires manual reply", "negotiation_id", n.ID)
 			continue
 		}
-		if err := w.hhClient.SendNegotiationReply(ctx, n.ID, hh.SendReplyRequest{Text: reply}); err != nil {
+		if err := w.browserCtx.SendMessage(ctx, n.ID, reply); err != nil {
 			return fmt.Errorf("send text reply for %s: %w", n.ID, err)
 		}
 		_ = w.hub.Broadcast(ctx, "new_message", map[string]any{"negotiation_id": n.ID, "reply_type": "auto_text"})
@@ -74,7 +77,10 @@ func (w *ReplyWorker) ProcessNegotiations(ctx context.Context, resume string, va
 }
 
 func (w *ReplyWorker) GenerateDraft(ctx context.Context, negotiationID string) (DraftReply, error) {
-	messages, err := w.hhClient.ListNegotiationMessages(ctx, negotiationID)
+	if w.browserCtx == nil {
+		return DraftReply{}, fmt.Errorf("browser context is not configured")
+	}
+	messages, err := w.browserCtx.GetMessages(ctx, negotiationID)
 	if err != nil {
 		return DraftReply{}, fmt.Errorf("list messages for %s: %w", negotiationID, err)
 	}

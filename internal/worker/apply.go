@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"hh-autoresponder/internal/browser"
 	"hh-autoresponder/internal/filters"
 	"hh-autoresponder/internal/hh"
 	"hh-autoresponder/internal/limiter"
@@ -19,7 +20,7 @@ import (
 const coverLetterSystemPrompt = "Ты соискатель. Напиши краткое сопроводительное письмо на русском."
 
 type ApplyWorker struct {
-	hhClient    *hh.Client
+	browserCtx  *browser.AccountContext
 	llmClient   llm.LLMClient
 	limiter     *limiter.DailyLimiter
 	filterChain *filters.FilterChain
@@ -32,11 +33,11 @@ type ApplyWorker struct {
 	cancel  context.CancelFunc
 }
 
-func NewApplyWorker(hhClient *hh.Client, llmClient llm.LLMClient, limiter *limiter.DailyLimiter, chain *filters.FilterChain, stats *monitor.Collector, hub *ws.Hub, logger *slog.Logger) *ApplyWorker {
+func NewApplyWorker(browserCtx *browser.AccountContext, llmClient llm.LLMClient, limiter *limiter.DailyLimiter, chain *filters.FilterChain, stats *monitor.Collector, hub *ws.Hub, logger *slog.Logger) *ApplyWorker {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ApplyWorker{hhClient: hhClient, llmClient: llmClient, limiter: limiter, filterChain: chain, stats: stats, hub: hub, logger: logger}
+	return &ApplyWorker{browserCtx: browserCtx, llmClient: llmClient, limiter: limiter, filterChain: chain, stats: stats, hub: hub, logger: logger}
 }
 
 func (w *ApplyWorker) Start(ctx context.Context, searchURLs []string, resumeID string) error {
@@ -74,9 +75,23 @@ func (w *ApplyWorker) Stop() {
 }
 
 func (w *ApplyWorker) run(ctx context.Context, searchURLs []string, resumeID string) error {
-	vacancies, err := w.hhClient.CollectVacanciesByURLs(ctx, searchURLs, 5)
-	if err != nil {
-		return fmt.Errorf("collect vacancies: %w", err)
+	if w.browserCtx == nil {
+		return fmt.Errorf("browser context is not configured")
+	}
+	vacancyMap := map[string]struct{}{}
+	vacancies := make([]hh.Vacancy, 0)
+	for _, url := range searchURLs {
+		items, err := w.browserCtx.SearchVacancies(ctx, url)
+		if err != nil {
+			return fmt.Errorf("collect vacancies from %s: %w", url, err)
+		}
+		for _, item := range items {
+			if _, ok := vacancyMap[item.ID]; ok {
+				continue
+			}
+			vacancyMap[item.ID] = struct{}{}
+			vacancies = append(vacancies, item)
+		}
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -105,12 +120,15 @@ func (w *ApplyWorker) run(ctx context.Context, searchURLs []string, resumeID str
 			if err != nil {
 				return fmt.Errorf("generate cover letter for %s: %w", vacancy.ID, err)
 			}
-			applyErr := w.hhClient.ApplyToVacancy(gctx, hh.ApplyRequest{ResumeID: resumeID, VacancyID: vacancy.ID, CoverLetter: coverLetter})
+			applyRes, applyErr := w.browserCtx.ApplyToVacancy(gctx, vacancy.ID, resumeID, coverLetter)
 			result := hh.ApplyResult{VacancyID: vacancy.ID, Company: vacancy.Employer.Name, Status: "applied"}
 			if applyErr != nil {
 				result.Status = "failed"
 				result.Reason = applyErr.Error()
 				w.logger.Error("apply failed", "vacancy_id", vacancy.ID, "company", vacancy.Employer.Name, "error", applyErr)
+			} else if applyRes != nil && !applyRes.Success {
+				result.Status = "failed"
+				result.Reason = applyRes.Error
 			} else {
 				w.stats.IncApplies()
 				w.logger.Info("apply success", "vacancy_id", vacancy.ID, "company", vacancy.Employer.Name)

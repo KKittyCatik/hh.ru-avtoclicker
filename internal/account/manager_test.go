@@ -1,6 +1,7 @@
 package account
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,6 +20,40 @@ func TestLoadEmptyFile(t *testing.T) {
 	}
 	if len(mgr.GetAll()) != 0 {
 		t.Fatalf("expected no accounts, got %d", len(mgr.GetAll()))
+	}
+}
+
+func TestEncryptDecryptPassword(t *testing.T) {
+	key := []byte("12345678901234567890123456789012")
+	encrypted, err := EncryptPassword("secret", key)
+	if err != nil {
+		t.Fatalf("encrypt password: %v", err)
+	}
+	if encrypted == "secret" {
+		t.Fatal("expected encrypted payload")
+	}
+	decrypted, err := DecryptPassword(encrypted, key)
+	if err != nil {
+		t.Fatalf("decrypt password: %v", err)
+	}
+	if decrypted != "secret" {
+		t.Fatalf("unexpected decrypted password: %s", decrypted)
+	}
+}
+
+func TestLoadEncryptionKeyFromEnv(t *testing.T) {
+	key := []byte("12345678901234567890123456789012")
+	if err := os.Setenv("ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(key)); err != nil {
+		t.Fatalf("set env: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Unsetenv("ENCRYPTION_KEY") })
+
+	got, err := LoadEncryptionKeyFromEnv()
+	if err != nil {
+		t.Fatalf("load key: %v", err)
+	}
+	if string(got) != string(key) {
+		t.Fatalf("unexpected key value")
 	}
 }
 
