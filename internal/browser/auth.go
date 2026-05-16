@@ -15,10 +15,6 @@ func (ac *AccountContext) Login(email, password string) error {
 	ctx, cancel := withTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	if err := os.MkdirAll("debug", 0o755); err != nil {
-		return fmt.Errorf("create debug dir: %w", err)
-	}
-
 	if _, err := ac.Page.Goto("https://hh.ru/account/login", playwright.PageGotoOptions{
 		Timeout:   playwright.Float(30000),
 		WaitUntil: playwright.WaitUntilStateLoad,
@@ -45,7 +41,7 @@ func (ac *AccountContext) Login(email, password string) error {
 	}
 	if !emailFound {
 		_, _ = ac.Page.Screenshot(playwright.PageScreenshotOptions{
-			Path: playwright.String(fmt.Sprintf("debug/login_err_%s.png", time.Now().Format("150405"))),
+			Path: playwright.String(fmt.Sprintf("debug/login_err_%s.png", time.Now().Format("20060102_150405.000"))),
 		})
 		return fmt.Errorf("login page did not load: no email input found")
 	}
