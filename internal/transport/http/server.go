@@ -24,11 +24,17 @@ func NewServer(addr string, handlers *Handlers, hub *ws.Hub) *http.Server {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Logger)
 
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-	    w.Header().Set("Content-Type", "application/json")
-	    w.WriteHeader(http.StatusOK)
-	    _, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
+	// Health check — handle both GET and HEAD (Docker uses HEAD)
+	healthHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if r.Method != http.MethodHead {
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		}
+	}
+	r.Get("/health", healthHandler)
+	r.Head("/health", healthHandler)
+
 	r.Get("/ws", hub.ServeHTTP)
 	r.Get("/callback", handlers.AuthCallback)
 
